@@ -1,0 +1,38 @@
+# Rule thresholds — editable without touching code.
+# Each rule contributes "points" to a 0-100 raw score, which is
+# normalized to 0-1 before being combined with the ML score.
+
+usage_spike:
+  multiplier: 3.0        # usage > multiplier * avg_usage triggers this rule
+  points: 30
+
+new_device_high_usage:
+  max_device_age_days: 1
+  min_usage_mb: 1000
+  points: 25
+
+odd_hour_new_location:
+  start_hour: 2
+  end_hour: 5
+  min_distance_km: 50
+  points: 15
+
+payment_failures:
+  min_failures_7d: 3
+  points: 20
+
+many_devices:
+  max_devices_30d: 5      # more than this many devices in 30 days is suspicious
+  points: 15
+
+new_account_high_usage:
+  max_account_age_days: 3
+  min_usage_mb: 10000     # 10 GB for new accounts (your 1-2 GB/day pattern)
+  points: 20
+
+# Hard rules bypass the ensemble entirely — if triggered, decision is forced.
+blacklisted_macs:
+  - "AA:BB:CC:DD:EE:FF"
+  - "DE:AD:BE:EF:00:00"
+
+max_raw_score: 100   # used to normalize raw points into a 0-1 rule_score
