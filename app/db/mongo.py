@@ -47,4 +47,10 @@ class MongoTransactionRepository:
         cursor = get_collection(collection_name).find(query).sort("_id", 1).skip(skip)
         if limit is not None:
             cursor = cursor.limit(limit)
-        return list(cursor)
+
+        documents = list(cursor)
+
+        for doc in documents:
+             doc["_id"] = str(doc["_id"])
+
+        return documents
