@@ -58,11 +58,19 @@
             Download PDF Report
           </button>
 
-          <div style="overflow-x: auto; margin-top: 12px;">
+          <!-- Triggered rules vs fraud percentage visualization -->
+          <div id="rule-breakdown-section" style="display: none; margin-top: 24px;">
+            <h3 style="margin-bottom: 4px;">Triggered Rules vs Fraud Percentage</h3>
+            <p style="margin-top: 0;">How often each rule fired, and what share of those firings were confirmed fraud.</p>
+            <div id="rule-bars" class="rule-bar-list"></div>
+          </div>
+
+          <div style="overflow-x: auto; margin-top: 20px;">
             <table id="stats-table" style="width: 100%; border-collapse: collapse; display: none;">
               <thead>
                 <tr>
                   <th>Customer ID</th>
+                  <th>Fraud Status</th>
                   <th>Decision</th>
                   <th>Final Score</th>
                   <th>Triggered Rules</th>
@@ -85,10 +93,37 @@
       const statsTable = document.getElementById('stats-table');
       const statsTableBody = document.getElementById('stats-table-body');
       const downloadReportBtn = document.getElementById('download-report-btn');
+      const ruleBreakdownSection = document.getElementById('rule-breakdown-section');
+      const ruleBars = document.getElementById('rule-bars');
 
       // Keep the last-used time range so the download button can reuse it
       // without the user having to re-enter it.
       let lastRange = null;
+
+      function renderRuleBreakdown(ruleBreakdown) {
+        if (!ruleBreakdown || ruleBreakdown.length === 0) {
+          ruleBreakdownSection.style.display = 'none';
+          ruleBars.innerHTML = '';
+          return;
+        }
+
+        ruleBars.innerHTML = ruleBreakdown.map((r) => {
+          const pct = Math.max(0, Math.min(100, r.fraud_percentage));
+          return `
+            <div class="rule-bar-row">
+              <div class="rule-bar-label">
+                <span>${r.rule.replace(/_/g, ' ')}</span>
+                <span class="rule-bar-meta">${r.fraud_count}/${r.total} fraud (${r.fraud_percentage}%)</span>
+              </div>
+              <div class="rule-bar-track">
+                <div class="rule-bar-fill" style="width: ${pct}%;"></div>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        ruleBreakdownSection.style.display = 'block';
+      }
 
       statsForm.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -104,6 +139,7 @@
         statsStatus.textContent = 'Loading...';
         statsTable.style.display = 'none';
         downloadReportBtn.style.display = 'none';
+        ruleBreakdownSection.style.display = 'none';
 
         try {
           const response = await fetch('/stats/by-time', {
@@ -122,17 +158,23 @@
           statsNormalPct.textContent = `${result.normal_percentage}%`;
           statsStatus.textContent = `Fraud: ${result.fraud_count}  |  Normal: ${result.normal_count}`;
 
-          statsTableBody.innerHTML = result.records.map((r) => `
-            <tr>
-              <td>${r.customer_id}</td>
-              <td>${r.decision}</td>
-              <td>${r.final_score.toFixed(4)}</td>
-              <td>${r.triggered_rules.length ? r.triggered_rules.join(', ') : 'None'}</td>
-              <td>${new Date(r.created_at).toLocaleString()}</td>
-            </tr>
-          `).join('');
+          statsTableBody.innerHTML = result.records.map((r) => {
+            const fraudClass = r.is_fraud ? 'fraud-status-fraud' : 'fraud-status-normal';
+            const fraudLabel = r.is_fraud ? 'FRAUD' : 'NOT FRAUD';
+            return `
+              <tr>
+                <td>${r.customer_id}</td>
+                <td class="${fraudClass}">${fraudLabel}</td>
+                <td>${r.decision}</td>
+                <td>${r.final_score.toFixed(4)}</td>
+                <td>${r.triggered_rules.length ? r.triggered_rules.join(', ') : 'None'}</td>
+                <td>${new Date(r.created_at).toLocaleString()}</td>
+              </tr>
+            `;
+          }).join('');
 
           statsTable.style.display = result.records.length ? 'table' : 'none';
+          renderRuleBreakdown(result.rule_breakdown);
 
           // Show the download button once we have a valid range/result,
           // even if there are 0 records — the PDF will just say so.

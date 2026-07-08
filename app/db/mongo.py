@@ -16,7 +16,6 @@ DEFAULT_MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 DEFAULT_MONGODB_DB = os.getenv("MONGODB_DB", "fraud_api")
 DEFAULT_MONGODB_COLLECTION = os.getenv("MONGODB_COLLECTION", "transactions")
 
-# NEW: collection where scored results are stored automatically
 DEFAULT_PREDICTIONS_COLLECTION = os.getenv("MONGODB_PREDICTIONS_COLLECTION", "fraud_predictions")
 
 _client: Optional[Any] = None
@@ -68,7 +67,6 @@ class MongoPredictionRepository:
     """
 
     def ensure_indexes(self, collection_name: Optional[str] = None) -> None:
-        # Speeds up time-range queries significantly as data grows.
         get_predictions_collection(collection_name).create_index("created_at")
         get_predictions_collection(collection_name).create_index("customer_id")
 
@@ -91,7 +89,7 @@ class MongoPredictionRepository:
             {"$match": {"created_at": {"$gte": start_time, "$lte": end_time}}},
             {
                 "$facet": {
-                    # Counts grouped by is_fraud (True/False)
+                    # Overall fraud vs normal counts
                     "summary": [
                         {"$group": {"_id": "$is_fraud", "count": {"$sum": 1}}}
                     ],
@@ -112,9 +110,45 @@ class MongoPredictionRepository:
                             }
                         },
                     ],
+                    # NEW: per-rule breakdown — how many times each rule
+                    # fired in this period, and what fraction of those
+                    # firings were confirmed fraud.
+                    "rule_breakdown": [
+                        {"$unwind": "$triggered_rules"},
+                        {
+                            "$group": {
+                                "_id": "$triggered_rules",
+                                "total": {"$sum": 1},
+                                "fraud_count": {
+                                    "$sum": {"$cond": ["$is_fraud", 1, 0]}
+                                },
+                            }
+                        },
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "rule": "$_id",
+                                "total": 1,
+                                "fraud_count": 1,
+                                "fraud_percentage": {
+                                    "$cond": [
+                                        {"$eq": ["$total", 0]},
+                                        0,
+                                        {
+                                            "$multiply": [
+                                                {"$divide": ["$fraud_count", "$total"]},
+                                                100,
+                                            ]
+                                        },
+                                    ]
+                                },
+                            }
+                        },
+                        {"$sort": {"total": -1}},
+                    ],
                 }
             },
         ]
 
         result = list(collection.aggregate(pipeline))
-        return result[0] if result else {"summary": [], "records": []}
+        return result[0] if result else {"summary": [], "records": [], "rule_breakdown": []}

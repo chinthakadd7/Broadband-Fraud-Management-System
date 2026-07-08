@@ -153,6 +153,51 @@ button:hover { filter: brightness(1.08); }
   font-size: 11px;
   color: var(--muted);
 }
+/* Fraud Status column colors */
+.fraud-status-fraud {
+  color: var(--danger);
+  font-weight: 700;
+}
+.fraud-status-normal {
+  color: var(--safe);
+  font-weight: 700;
+}
+
+/* Triggered rules vs fraud percentage bar visualization */
+.rule-bar-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+}
+.rule-bar-row {
+  display: grid;
+  gap: 6px;
+}
+.rule-bar-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+.rule-bar-label span:first-child {
+  color: var(--text);
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.rule-bar-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+.rule-bar-track {
+  height: 14px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.06);
+  overflow: hidden;
+}
+.rule-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--warning), var(--danger));
+}
 
 #stats-table th, #stats-table td {
   text-align: left;

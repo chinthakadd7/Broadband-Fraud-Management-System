@@ -89,6 +89,17 @@ class FraudRecordSummary(BaseModel):
     created_at: datetime
 
 
+class TriggeredRuleStat(BaseModel):
+    """
+    How often a single rule fired within the requested time period, and
+    what fraction of those firings turned out to be actual fraud.
+    """
+    rule: str
+    total: int
+    fraud_count: int
+    fraud_percentage: float
+
+
 class TimeRangeStatsResponse(BaseModel):
     start_time: datetime
     end_time: datetime
@@ -98,3 +109,4 @@ class TimeRangeStatsResponse(BaseModel):
     fraud_percentage: float
     normal_percentage: float
     records: List[FraudRecordSummary]
+    rule_breakdown: List[TriggeredRuleStat] = Field(default_factory=list)

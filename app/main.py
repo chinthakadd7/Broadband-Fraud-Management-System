@@ -12,6 +12,7 @@ from app.models.schemas import (
     TimeRangeStatsRequest,
     TimeRangeStatsResponse,
     FraudRecordSummary,
+    TriggeredRuleStat,
 )
 from app.core.logging import setup_logging
 from app.services.batch import score_batch_documents, to_storage_documents
@@ -105,6 +106,16 @@ def _compute_stats(request: TimeRangeStatsRequest) -> TimeRangeStatsResponse:
 
     records = [FraudRecordSummary(**r) for r in result.get("records", [])]
 
+    rule_breakdown = [
+        TriggeredRuleStat(
+            rule=r["rule"],
+            total=r["total"],
+            fraud_count=r["fraud_count"],
+            fraud_percentage=round(r["fraud_percentage"], 2),
+        )
+        for r in result.get("rule_breakdown", [])
+    ]
+
     return TimeRangeStatsResponse(
         start_time=request.start_time,
         end_time=request.end_time,
@@ -114,6 +125,7 @@ def _compute_stats(request: TimeRangeStatsRequest) -> TimeRangeStatsResponse:
         fraud_percentage=fraud_pct,
         normal_percentage=normal_pct,
         records=records,
+        rule_breakdown=rule_breakdown,
     )
 
 
@@ -129,7 +141,8 @@ def stats_by_time(request: TimeRangeStatsRequest):
 @app.post("/stats/by-time/report")
 def stats_by_time_report(request: TimeRangeStatsRequest):
     """
-    Same data as /stats/by-time, but rendered as a downloadable PDF.
+    Same data as /stats/by-time, but rendered as a downloadable PDF,
+    including a bar chart of triggered rules vs fraud percentage.
     """
     try:
         stats = _compute_stats(request)
@@ -143,6 +156,7 @@ def stats_by_time_report(request: TimeRangeStatsRequest):
             fraud_percentage=stats.fraud_percentage,
             normal_percentage=stats.normal_percentage,
             records=[r.model_dump() for r in stats.records],
+            rule_breakdown=[r.model_dump() for r in stats.rule_breakdown],
         )
     except Exception as e:
         logger.exception("PDF report generation failed")
