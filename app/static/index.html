@@ -100,6 +100,22 @@
       // without the user having to re-enter it.
       let lastRange = null;
 
+      // The <input type="datetime-local"> gives back a plain string like
+      // "2026-07-09T14:30" with NO timezone info. The browser actually
+      // means "2026-07-09T14:30 in your local timezone", but if we send
+      // that string as-is, the backend has no way to know that — it just
+      // sees "14:30" and compares it directly against UTC timestamps in
+      // MongoDB, causing a mismatch equal to your UTC offset (e.g. 5.5
+      // hours for Sri Lanka). This converts it into a real, unambiguous
+      // UTC ISO string first, so the comparison is always correct
+      // regardless of where the user is.
+      function localInputToUtcIso(localValue) {
+        // `new Date("2026-07-09T14:30")` is parsed by the browser AS
+        // LOCAL TIME. `.toISOString()` then converts that same instant
+        // to true UTC, e.g. "2026-07-09T09:00:00.000Z".
+        return new Date(localValue).toISOString();
+      }
+
       function renderRuleBreakdown(ruleBreakdown) {
         if (!ruleBreakdown || ruleBreakdown.length === 0) {
           ruleBreakdownSection.style.display = 'none';
@@ -129,10 +145,11 @@
         event.preventDefault();
 
         const data = Object.fromEntries(new FormData(statsForm).entries());
-        // datetime-local gives "YYYY-MM-DDTHH:mm" — valid ISO 8601 for FastAPI/pydantic.
+        // Convert local wall-clock input into unambiguous UTC before
+        // sending, so results are correct no matter the user's timezone.
         const payload = {
-          start_time: data.start_time,
-          end_time: data.end_time,
+          start_time: localInputToUtcIso(data.start_time),
+          end_time: localInputToUtcIso(data.end_time),
         };
         lastRange = payload;
 
@@ -208,7 +225,9 @@
 
           const link = document.createElement('a');
           link.href = url;
-          link.download = `fraud_report_${lastRange.start_time}_${lastRange.end_time}.pdf`;
+          const safeStart = lastRange.start_time.replace(/[:.]/g, '-');
+          const safeEnd = lastRange.end_time.replace(/[:.]/g, '-');
+          link.download = `fraud_report_${safeStart}_${safeEnd}.pdf`;
           document.body.appendChild(link);
           link.click();
           link.remove();
