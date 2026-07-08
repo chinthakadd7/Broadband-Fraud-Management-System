@@ -19,55 +19,7 @@
       </header>
 
       <div class="dashboard-grid">
-        <div class="card">
-          <h3>Customer Input</h3>
-          <p>Submit the latest account activity to score the risk level.</p>
-          <form id="fraud-form">
-            <div class="grid-2">
-              <label>Customer ID <input name="customer_id" value="CUST-10293" required /></label>
-              <label>MAC Address <input name="mac_address" value="AA:BB:CC:DD:EE:FF" required /></label>
-              <label>Usage MB <input type="number" step="0.1" name="usage_mb" value="15230.5" required /></label>
-              <label>Avg Usage MB <input type="number" step="0.1" name="avg_usage_mb" value="2100.0" required /></label>
-              <label>Device Age Days <input type="number" name="device_age_days" value="0" required /></label>
-              <label>Devices in 30d <input type="number" name="num_devices_30d" value="4" required /></label>
-              <label>Failed Payments 7d <input type="number" name="failed_payments_7d" value="3" required /></label>
-              <label>Account Age Days <input type="number" name="account_age_days" value="5" required /></label>
-              <label>Login Hour <input type="number" name="login_hour" min="0" max="23" value="3" required /></label>
-              <label>Distance from Usual (km) <input type="number" step="0.1" name="distance_from_usual_km" value="120.0" required /></label>
-            </div>
-            <button type="submit">Check Fraud Risk</button>
-          </form>
-        </div>
-
-        <div class="card">
-          <h3>Live Risk Overview</h3>
-          <p>Summary of the latest fraud score and rule impact.</p>
-          <div class="summary-grid">
-            <div class="summary-box">
-              <div class="label">Rule Score</div>
-              <div class="value" id="rule-score">--</div>
-            </div>
-            <div class="summary-box">
-              <div class="label">ML Score</div>
-              <div class="value" id="ml-score">--</div>
-            </div>
-            <div class="summary-box">
-              <div class="label">Final Score</div>
-              <div class="value" id="final-score">--</div>
-            </div>
-          </div>
-
-          <div id="result" class="result">
-            <div class="status">Fill the form and click the button to run the model.</div>
-          </div>
-
-          <div class="chart" id="chart">
-            <div class="bar" data-label="Rule" style="height: 40%"></div>
-            <div class="bar" data-label="ML" style="height: 70%"></div>
-            <div class="bar" data-label="Final" style="height: 55%"></div>
-          </div>
-        </div>
-        <div class="card" style="grid-column: 1 / -1; margin-top: 20px;">
+        <div class="card" style="grid-column: 1 / -1;">
           <h3>Fraud Statistics by Time Period</h3>
           <p>Pick a time range to see everything scored and stored during that window.</p>
 
@@ -98,6 +50,14 @@
 
           <div id="stats-status" class="status" style="margin-top: 10px;">Choose a time range and click "Get Statistics".</div>
 
+          <button
+            type="button"
+            id="download-report-btn"
+            style="margin-top: 14px; display: none;"
+          >
+            Download PDF Report
+          </button>
+
           <div style="overflow-x: auto; margin-top: 12px;">
             <table id="stats-table" style="width: 100%; border-collapse: collapse; display: none;">
               <thead>
@@ -117,12 +77,6 @@
     </div>
 
     <script>
-      const form = document.getElementById('fraud-form');
-      const resultBox = document.getElementById('result');
-      const ruleScoreBox = document.getElementById('rule-score');
-      const mlScoreBox = document.getElementById('ml-score');
-      const finalScoreBox = document.getElementById('final-score');
-      const chart = document.getElementById('chart');
       const statsForm = document.getElementById('stats-form');
       const statsStatus = document.getElementById('stats-status');
       const statsTotal = document.getElementById('stats-total');
@@ -130,84 +84,26 @@
       const statsNormalPct = document.getElementById('stats-normal-pct');
       const statsTable = document.getElementById('stats-table');
       const statsTableBody = document.getElementById('stats-table-body');
+      const downloadReportBtn = document.getElementById('download-report-btn');
 
-      function updateChart(rule, ml, final) {
-        const bars = chart.querySelectorAll('.bar');
-        const values = [rule, ml, final];
-        bars.forEach((bar, index) => {
-          const height = Math.max(18, Math.round(values[index] * 100));
-          bar.style.height = `${height}%`;
-        });
-      }
+      // Keep the last-used time range so the download button can reuse it
+      // without the user having to re-enter it.
+      let lastRange = null;
 
-      form.addEventListener('submit', async (event) => {
-        event.preventDefault();
-
-        const data = Object.fromEntries(new FormData(form).entries());
-        const numericFields = [
-          'usage_mb',
-          'avg_usage_mb',
-          'device_age_days',
-          'num_devices_30d',
-          'failed_payments_7d',
-          'account_age_days',
-          'login_hour',
-          'distance_from_usual_km'
-        ];
-
-        numericFields.forEach((field) => {
-          data[field] = Number(data[field]);
-        });
-
-        resultBox.innerHTML = '<div class="status">Analyzing...</div>';
-
-        try {
-          const response = await fetch('/predict', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-          });
-
-          const payload = await response.json();
-
-          if (!response.ok) {
-            throw new Error(payload.detail || 'Prediction request failed');
-          }
-
-          const decisionClass = payload.decision.toLowerCase();
-          const badgeClass = decisionClass === 'block' ? 'block' : decisionClass === 'review' ? 'review' : 'safe';
-
-          ruleScoreBox.textContent = payload.rule_score.toFixed(4);
-          mlScoreBox.textContent = payload.ml_score.toFixed(4);
-          finalScoreBox.textContent = payload.final_score.toFixed(4);
-          updateChart(payload.rule_score, payload.ml_score, payload.final_score);
-
-          resultBox.innerHTML = `
-            <div class="badge">${payload.model_version}</div>
-            <div class="${badgeClass}" style="margin-top:8px;"><strong>Decision:</strong> ${payload.decision}</div>
-            <div class="metric-list">
-              <div class="metric"><strong>Rule Score</strong>${payload.rule_score.toFixed(4)}</div>
-              <div class="metric"><strong>ML Score</strong>${payload.ml_score.toFixed(4)}</div>
-              <div class="metric"><strong>Final Score</strong>${payload.final_score.toFixed(4)}</div>
-            </div>
-            <div class="metric" style="margin-top:10px;"><strong>Triggered Rules</strong>${payload.triggered_rules.length ? payload.triggered_rules.join(', ') : 'None'}</div>
-          `;
-        } catch (error) {
-          resultBox.innerHTML = `<div class="error">${error.message}</div>`;
-        }
-      });
       statsForm.addEventListener('submit', async (event) => {
         event.preventDefault();
 
         const data = Object.fromEntries(new FormData(statsForm).entries());
-        // datetime-local gives "YYYY-MM-DDTHH:mm" — that's valid ISO 8601 for FastAPI/pydantic.
+        // datetime-local gives "YYYY-MM-DDTHH:mm" — valid ISO 8601 for FastAPI/pydantic.
         const payload = {
           start_time: data.start_time,
           end_time: data.end_time,
         };
+        lastRange = payload;
 
         statsStatus.textContent = 'Loading...';
         statsTable.style.display = 'none';
+        downloadReportBtn.style.display = 'none';
 
         try {
           const response = await fetch('/stats/by-time', {
@@ -237,10 +133,50 @@
           `).join('');
 
           statsTable.style.display = result.records.length ? 'table' : 'none';
+
+          // Show the download button once we have a valid range/result,
+          // even if there are 0 records — the PDF will just say so.
+          downloadReportBtn.style.display = 'inline-block';
         } catch (error) {
           statsStatus.textContent = error.message;
         }
-      
+      });
+
+      downloadReportBtn.addEventListener('click', async () => {
+        if (!lastRange) return;
+
+        downloadReportBtn.disabled = true;
+        downloadReportBtn.textContent = 'Generating PDF...';
+
+        try {
+          const response = await fetch('/stats/by-time/report', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(lastRange),
+          });
+
+          if (!response.ok) {
+            const errPayload = await response.json().catch(() => ({}));
+            throw new Error(errPayload.detail || 'Report generation failed');
+          }
+
+          // Convert the PDF response into a downloadable file in the browser.
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `fraud_report_${lastRange.start_time}_${lastRange.end_time}.pdf`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          window.URL.revokeObjectURL(url);
+        } catch (error) {
+          statsStatus.textContent = error.message;
+        } finally {
+          downloadReportBtn.disabled = false;
+          downloadReportBtn.textContent = 'Download PDF Report';
+        }
       });
     </script>
   </body>

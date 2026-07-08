@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from app.db.mongo import (
     DEFAULT_MONGODB_COLLECTION,
     MongoTransactionRepository,
@@ -16,6 +16,7 @@ from app.models.schemas import (
 from app.core.logging import setup_logging
 from app.services.batch import score_batch_documents, to_storage_documents
 from app.services.ml import MODEL_VERSION, get_model
+from app.services.report import build_pdf_report
 import os
 
 logger = setup_logging()
@@ -36,8 +37,6 @@ def load_model_on_startup():
     get_model()
     logger.info("XGBoost model loaded, version=%s", MODEL_VERSION)
 
-    # Make sure the predictions collection has the indexes it needs
-    # before any time-range queries hit it.
     MongoPredictionRepository().ensure_indexes()
     logger.info("Ensured indexes on fraud_predictions collection")
 
@@ -67,9 +66,6 @@ def predict_batch(request: BatchPredictionRequest):
         )
         predictions, summary = score_batch_documents(documents)
 
-        # --- Automatic storage ---
-        # Every scored batch is persisted with a timestamp so it can be
-        # queried later by time period via /stats/by-time.
         storage_docs = to_storage_documents(predictions)
         saved_count = prediction_repository.save_predictions(storage_docs)
         logger.info("Saved %d scored predictions to fraud_predictions", saved_count)
@@ -86,19 +82,18 @@ def predict_batch(request: BatchPredictionRequest):
     )
 
 
-@app.post("/stats/by-time", response_model=TimeRangeStatsResponse)
-def stats_by_time(request: TimeRangeStatsRequest):
+def _compute_stats(request: TimeRangeStatsRequest) -> TimeRangeStatsResponse:
+    """
+    Shared logic used by both the JSON stats endpoint and the PDF report
+    endpoint, so the two never drift out of sync with each other.
+    """
     prediction_repository = MongoPredictionRepository()
 
-    try:
-        result = prediction_repository.fetch_stats_by_time_range(
-            start_time=request.start_time,
-            end_time=request.end_time,
-            collection_name=request.collection_name,
-        )
-    except Exception as e:
-        logger.exception("Time-range stats query failed")
-        raise HTTPException(status_code=500, detail=f"Stats query failed: {e}")
+    result = prediction_repository.fetch_stats_by_time_range(
+        start_time=request.start_time,
+        end_time=request.end_time,
+        collection_name=request.collection_name,
+    )
 
     summary_counts = {item["_id"]: item["count"] for item in result.get("summary", [])}
     fraud_count = summary_counts.get(True, 0)
@@ -119,4 +114,44 @@ def stats_by_time(request: TimeRangeStatsRequest):
         fraud_percentage=fraud_pct,
         normal_percentage=normal_pct,
         records=records,
+    )
+
+
+@app.post("/stats/by-time", response_model=TimeRangeStatsResponse)
+def stats_by_time(request: TimeRangeStatsRequest):
+    try:
+        return _compute_stats(request)
+    except Exception as e:
+        logger.exception("Time-range stats query failed")
+        raise HTTPException(status_code=500, detail=f"Stats query failed: {e}")
+
+
+@app.post("/stats/by-time/report")
+def stats_by_time_report(request: TimeRangeStatsRequest):
+    """
+    Same data as /stats/by-time, but rendered as a downloadable PDF.
+    """
+    try:
+        stats = _compute_stats(request)
+
+        pdf_bytes = build_pdf_report(
+            start_time=stats.start_time,
+            end_time=stats.end_time,
+            total_records=stats.total_records,
+            fraud_count=stats.fraud_count,
+            normal_count=stats.normal_count,
+            fraud_percentage=stats.fraud_percentage,
+            normal_percentage=stats.normal_percentage,
+            records=[r.model_dump() for r in stats.records],
+        )
+    except Exception as e:
+        logger.exception("PDF report generation failed")
+        raise HTTPException(status_code=500, detail=f"Report generation failed: {e}")
+
+    filename = f"fraud_report_{stats.start_time.date()}_{stats.end_time.date()}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
